@@ -10,32 +10,50 @@ from django.urls import reverse
 from django.db.models import Count
 from .forms import PostForm, CommentForm
 from .models import Post, Category, Comment
-
+from .utils import paginate_queryset  # Новый импорт
 
 User = get_user_model()
 POSTS_PER_PAGE = 10
 
-class PaginationMixin:
-    paginate_by = POSTS_PER_PAGE
+
+# Утилиты для вынесения повторяющегося кода
+def get_published_posts():
+    """Получение опубликованных постов с аннотацией количества комментариев"""
+    return Post.objects.published() \
+        .select_related('author', 'location', 'category') \
+        .prefetch_related('comments') \
+        .annotate(comment_count=Count('comments')) \
+        .order_by('-pub_date')
 
 
-class IndexView(PaginationMixin, ListView):
+def get_user_posts(user, current_user=None):
+    """Получение постов пользователя с учетом прав доступа"""
+    qs = Post.objects.filter(author=user) \
+        .select_related('author', 'location', 'category') \
+        .prefetch_related('comments') \
+        .annotate(comment_count=Count('comments'))
+    
+    if not (current_user and current_user.is_authenticated and current_user == user):
+        qs = qs.filter(is_published=True, pub_date__lte=timezone.now())
+    
+    return qs.order_by('-pub_date')
+
+
+class IndexView(ListView):
     model = Post
     template_name = 'blog/index.html'
     context_object_name = 'posts'
+    paginate_by = POSTS_PER_PAGE
 
     def get_queryset(self):
-        return Post.objects.published() \
-            .select_related('author', 'location', 'category') \
-            .prefetch_related('comments') \
-            .annotate(comment_count=Count('comments')) \
-            .order_by('-pub_date')
+        return get_published_posts()
 
 
-class ProfileView(PaginationMixin, ListView):
+class ProfileView(ListView):
     model = Post
     template_name = 'blog/profile.html'
     context_object_name = 'posts'
+    paginate_by = POSTS_PER_PAGE
 
     def get_profile_user(self):
         return get_object_or_404(
@@ -44,15 +62,7 @@ class ProfileView(PaginationMixin, ListView):
 
     def get_queryset(self):
         user = self.get_profile_user()
-        qs = Post.objects.filter(author=user) \
-            .select_related('author', 'location', 'category') \
-            .prefetch_related('comments') \
-            .annotate(comment_count=Count('comments'))
-        
-        if not (self.request.user.is_authenticated and self.request.user == user):
-            qs = qs.filter(is_published=True, pub_date__lte=timezone.now())
-        
-        return qs.order_by('-pub_date')
+        return get_user_posts(user, self.request.user)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -60,10 +70,11 @@ class ProfileView(PaginationMixin, ListView):
         return ctx
 
 
-class CategoryListView(PaginationMixin, ListView):
+class CategoryListView(ListView):
     model = Post
     template_name = 'blog/category.html'
     context_object_name = 'posts'
+    paginate_by = POSTS_PER_PAGE
 
     def get_category(self):
         return get_object_or_404(Category, slug=self.kwargs['category_slug'], is_published=True)
@@ -71,7 +82,7 @@ class CategoryListView(PaginationMixin, ListView):
     def get_queryset(self):
         category = self.get_category()
         return (
-            Post.objects.filter(is_published=True, pub_date__lte=timezone.now())
+            Post.objects.published()
             .filter(category=category)
             .select_related('author', 'location', 'category')
             .prefetch_related('comments')
@@ -92,7 +103,8 @@ class PostDetailView(DetailView):
 
     def get_object(self, queryset=None):
         obj = get_object_or_404(
-            Post.objects.annotate(comment_count=Count('comments')),
+            Post.objects.select_related('author', 'location', 'category')
+            .annotate(comment_count=Count('comments')),
             id=self.kwargs['post_id']
         )
         visible = obj.is_published and obj.pub_date <= timezone.now()
@@ -193,8 +205,12 @@ class CommentCreateView(LoginRequiredMixin, CreateView):
         return redirect('blog:post_detail', post_id=post.id)
 
     def form_invalid(self, form):
-        post = get_object_or_404(Post, id=self.kwargs['id'])
-        return self.render_to_response({'post': post, 'form': form,})
+        post = get_object_or_404(Post, id=self.kwargs['post_id'])
+        return self.render_to_response({
+            'post': post,
+            'form': form,
+            'comments': post.comments.select_related('author').all()
+        })
 
 
 class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):

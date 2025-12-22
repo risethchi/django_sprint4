@@ -139,4 +139,4 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 EMAIL_BACKEND = 'django.core.mail.backends.filebased.EmailBackend'
 EMAIL_FILE_PATH = BASE_DIR / 'sent_emails'
-DEFAULT_FROM_EMAIL = 'chudinastyc@gmail.com'
+DEFAULT_FROM_EMAIL = 'rita.lazareva@gmail.com'
