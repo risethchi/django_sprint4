@@ -4,6 +4,25 @@ from django.utils import timezone
 
 User = get_user_model()
 
+class PostManager(models.Manager):
+    def published(self):
+        """
+        Получить опубликованные посты, у которых дата публикации не позже текущего времени
+        и категория опубликована.
+        """
+        return self.filter(
+            is_published=True,
+            pub_date__lte=timezone.now(),
+            category__is_published=True
+        )
+    
+    def get_related_objects(self, queryset=None):
+        """
+        Получить посты со связанными объектами.
+        """
+        if queryset is None:
+            queryset = self.all()
+        return queryset.select_related('author', 'location', 'category')
 
 class Category(models.Model):
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -53,35 +72,6 @@ class Location(models.Model):
         verbose_name = 'местоположение'
         verbose_name_plural = 'Местоположения'
 
-
-class PostManager(models.Manager):
-    def get_with_related_and_comments(self):
-        """
-        Получить посты со связанными объектами и комментариями.
-        """
-        return self.select_related(
-            'author', 'location', 'category'
-        ).prefetch_related('comments')
-        
-    def published(self):
-        """
-        Получить опубликованные посты, у которых дата публикации не в будущем
-        и категория опубликована.
-        """
-        return self.filter(
-            is_published=True,
-            pub_date__lte=timezone.now(),
-            category__is_published=True
-        )
-    
-    def count_comments(self, queryset=None):
-        """
-        Подсчитывает количество комментариев для каждого поста в queryset.
-        """
-        if queryset is None:
-            queryset = self.all()
-        return queryset.annotate(comment_count=models.Count('comments'))
-    
 
 class Post(models.Model):
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -153,7 +143,7 @@ class Comment(models.Model):
 
     class Meta:
         verbose_name = 'комментарий'
-        verbose_name_plural = 'комментарии' 
+        verbose_name_plural = 'комментарии'
         ordering = ('created_at',)
 
     def __str__(self) -> str:

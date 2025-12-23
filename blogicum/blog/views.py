@@ -10,33 +10,10 @@ from django.urls import reverse
 from django.db.models import Count
 from .forms import PostForm, CommentForm
 from .models import Post, Category, Comment
-from .utils import paginate_queryset  # Новый импорт
+from .utils import filter_published_posts, annotate_comments_count, paginate_queryset
 
 User = get_user_model()
 POSTS_PER_PAGE = 10
-
-
-# Утилиты для вынесения повторяющегося кода
-def get_published_posts():
-    """Получение опубликованных постов с аннотацией количества комментариев"""
-    return Post.objects.published() \
-        .select_related('author', 'location', 'category') \
-        .prefetch_related('comments') \
-        .annotate(comment_count=Count('comments')) \
-        .order_by('-pub_date')
-
-
-def get_user_posts(user, current_user=None):
-    """Получение постов пользователя с учетом прав доступа"""
-    qs = Post.objects.filter(author=user) \
-        .select_related('author', 'location', 'category') \
-        .prefetch_related('comments') \
-        .annotate(comment_count=Count('comments'))
-    
-    if not (current_user and current_user.is_authenticated and current_user == user):
-        qs = qs.filter(is_published=True, pub_date__lte=timezone.now())
-    
-    return qs.order_by('-pub_date')
 
 
 class IndexView(ListView):
@@ -46,7 +23,11 @@ class IndexView(ListView):
     paginate_by = POSTS_PER_PAGE
 
     def get_queryset(self):
-        return get_published_posts()
+        queryset = Post.objects.all()
+        queryset = filter_published_posts(queryset)
+        queryset = Post.objects.get_related_objects(queryset)
+        queryset = annotate_comments_count(queryset)
+        return queryset.order_by('-pub_date')
 
 
 class ProfileView(ListView):
@@ -62,7 +43,14 @@ class ProfileView(ListView):
 
     def get_queryset(self):
         user = self.get_profile_user()
-        return get_user_posts(user, self.request.user)
+        queryset = Post.objects.filter(author=user)
+        
+        if not (self.request.user.is_authenticated and self.request.user == user):
+            queryset = filter_published_posts(queryset)
+        
+        queryset = Post.objects.get_related_objects(queryset)
+        queryset = annotate_comments_count(queryset)
+        return queryset.order_by('-pub_date')
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -81,14 +69,11 @@ class CategoryListView(ListView):
 
     def get_queryset(self):
         category = self.get_category()
-        return (
-            Post.objects.published()
-            .filter(category=category)
-            .select_related('author', 'location', 'category')
-            .prefetch_related('comments')
-            .annotate(comment_count=Count('comments'))
-            .order_by('-pub_date')
-        )
+        queryset = Post.objects.filter(category=category)
+        queryset = filter_published_posts(queryset)
+        queryset = Post.objects.get_related_objects(queryset)
+        queryset = annotate_comments_count(queryset)
+        return queryset.order_by('-pub_date')
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -102,11 +87,12 @@ class PostDetailView(DetailView):
     context_object_name = 'post'
 
     def get_object(self, queryset=None):
-        obj = get_object_or_404(
-            Post.objects.select_related('author', 'location', 'category')
-            .annotate(comment_count=Count('comments')),
-            id=self.kwargs['post_id']
-        )
+        queryset = Post.objects.all()
+        queryset = Post.objects.get_related_objects(queryset)
+        queryset = annotate_comments_count(queryset)
+        
+        obj = get_object_or_404(queryset, id=self.kwargs['post_id'])
+        
         visible = obj.is_published and obj.pub_date <= timezone.now()
         if not visible and not (self.request.user.is_authenticated and self.request.user == obj.author):
             raise Http404('Публикация недоступна.')
@@ -184,9 +170,9 @@ class PostUpdateView(LoginRequiredMixin, OwnerRequiredMixin, UpdateView):
 
 class PostDeleteView(LoginRequiredMixin, OwnerRequiredMixin, DeleteView):
     model = Post
-    template_name = 'blog/create.html'
+    template_name = 'blog/delete.html'  
     pk_url_kwarg = 'post_id'
-
+    context_object_name = 'post'  
     def get_success_url(self):
         return reverse('blog:profile', kwargs={'username': self.request.user.username})
 
