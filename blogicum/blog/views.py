@@ -15,20 +15,28 @@ from .utils import filter_published_posts, annotate_comments_count, paginate_que
 User = get_user_model()
 POSTS_PER_PAGE = 10
 
-
 class IndexView(ListView):
     model = Post
     template_name = 'blog/index.html'
     context_object_name = 'posts'
     paginate_by = POSTS_PER_PAGE
+    
+def get_queryset(self):
+    now = timezone.now()
+    print(f"Current time: {now} (type: {type(now)})")
+    
+    all_posts = Post.objects.all()
+    for post in all_posts:
+        print(f"Post ID: {post.id}, Title: {post.title}, Pub Date: {post.pub_date} (type: {type(post.pub_date)})")
+        print(f"  Is published: {post.is_published}")
+        print(f"  Category is published: {post.category.is_published}")
+        print(f"  Date check: {post.pub_date <= now}")
+    
 
-    def get_queryset(self):
-        queryset = Post.objects.all()
-        queryset = filter_published_posts(queryset)
-        queryset = Post.objects.get_related_objects(queryset)
-        queryset = annotate_comments_count(queryset)
-        return queryset.order_by('-pub_date')
-
+    queryset = filter_published_posts(all_posts)
+    queryset = Post.objects.get_related_objects(queryset)
+    queryset = annotate_comments_count(queryset)
+    return queryset.order_by('-pub_date')
 
 class ProfileView(ListView):
     model = Post
@@ -170,9 +178,17 @@ class PostUpdateView(LoginRequiredMixin, OwnerRequiredMixin, UpdateView):
 
 class PostDeleteView(LoginRequiredMixin, OwnerRequiredMixin, DeleteView):
     model = Post
-    template_name = 'blog/delete.html'  
     pk_url_kwarg = 'post_id'
-    context_object_name = 'post'  
+    
+    def get(self, request, *args, **kwargs):
+        return self.post(request, *args, **kwargs)
+    
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        success_url = self.get_success_url()
+        self.object.delete()
+        return redirect(success_url)
+        
     def get_success_url(self):
         return reverse('blog:profile', kwargs={'username': self.request.user.username})
 

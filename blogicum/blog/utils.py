@@ -6,14 +6,25 @@ def filter_published_posts(queryset):
     """
     Фильтрация опубликованных записей
     """
-    from .models import Post 
-    if queryset is None:
-        queryset = Post.objects.all()
-    return queryset.filter(
+    # Важно: timezone.now() возвращает время с учетом микросекунд
+    # Для более точного сравнения и включения постов текущего дня:
+    now = timezone.now()
+    
+    # Для отладки
+    print(f"Current time for filtering: {now}")
+    
+    filtered_queryset = queryset.filter(
         is_published=True,
-        pub_date__lte=timezone.now(),
+        pub_date__lte=now,  # Используем меньше или равно
         category__is_published=True
     )
+    
+    # Для отладки - выводим найденные посты и их даты публикации
+    for post in filtered_queryset:
+        print(f"Post ID: {post.id}, Title: {post.title}, Pub Date: {post.pub_date}")
+        print(f"  Is visible: {post.pub_date <= now}")
+    
+    return filtered_queryset
 
 def annotate_comments_count(queryset):
     """
